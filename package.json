@@ -1,0 +1,24 @@
+{
+  "name": "budget-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for aggregating budget spreadsheets via DeepSeek AI",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "google-sheets",
+    "gemini"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "dotenv": "^17.2.3",
+    "googleapis": "^169.0.0",
+    "openai": "^6.15.0"
+  }
+}

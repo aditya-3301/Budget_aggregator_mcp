@@ -30,6 +30,8 @@ This project provides an MCP server for aggregating budget data from multiple Go
 4. Ensure your Google Service Account has the following scopes:
    - `https://www.googleapis.com/auth/spreadsheets`
 
+5. Grant editor access to the service account: Share your source and master Google Sheets with `budget-aggregator-agent@aggregator-agent.iam.gserviceaccount.com` as an editor to allow modification.
+
 ## Running the Aggregation Script
 
 To run the budget aggregation:

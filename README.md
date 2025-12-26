@@ -75,6 +75,5 @@ When connected to an MCP-compatible AI assistant, you can use the `aggregate_bud
 
 ## Notes
 
-- The aggregation script has hardcoded URLs for demonstration. Modify `aggregate.js` to accept dynamic URLs if needed.
 - Ensure all Google Sheets are accessible by the service account.
 - The AI models used are hosted via Hugging Face, requiring a valid token.

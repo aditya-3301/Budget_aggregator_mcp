@@ -37,7 +37,17 @@ async function getSheetName(spreadsheetId) {
   return res.data.sheets[0].properties.title;
 }
 
-async function getMapping(headers) {
+async function getMapping(headers, useLLM) {
+  if (!useLLM) {
+    let categoryIndex = null;
+    let amountIndex = null;
+    headers.forEach((header, i) => {
+      const h = header.toLowerCase();
+      if (h.includes('category')) categoryIndex = i;
+      if (h.includes('cost') || h.includes('amount') || h.includes('price')) amountIndex = i;
+    });
+    return { category: categoryIndex, amount: amountIndex };
+  }
   const prompt = `Identify the column indices for category and amount in the headers: ${JSON.stringify(headers)}. Category is the one with budget categories like Equipment, Food, Hosting. Amount is the numerical cost or spending, often called Cost, Amount, or Price. Return ONLY JSON {"category": index, "amount": index}, where indices are 0-based. If not found, use null.`;
   const completion = await client.chat.completions.create({
     model: "deepseek-ai/DeepSeek-V3.2:novita",
@@ -52,7 +62,21 @@ async function getMapping(headers) {
   return JSON.parse(responseText.replace(/```json|```/g, ""));
 }
 
+async function testKey() {
+  try {
+    const completion = await client.chat.completions.create({
+      model: "deepseek-ai/DeepSeek-V3.2:novita",
+      messages: [{ role: "user", content: "Say 'ok'" }],
+    });
+    return completion.choices[0].message.content.includes('ok');
+  } catch (err) {
+    return false;
+  }
+}
+
 async function aggregateBudgets() {
+  const useLLM = await testKey();
+
   const sourceInput = await prompt("Enter source Google Sheet URLs separated by commas: ");
   const source_urls = sourceInput.split(',').map(url => url.trim());
   const master_url = await prompt("Enter master Google Sheet URL: ");
@@ -67,7 +91,6 @@ async function aggregateBudgets() {
         spreadsheetId: id,
         range: `${sheetName}!A1:Z100`
       });
-      console.log(`Data:`, res.data.values);
       return res.data.values;
     }));
 
@@ -77,7 +100,7 @@ async function aggregateBudgets() {
     for (const data of allData) {
       if (data && data.length > 1) {
         const headers = data[0];
-        const mapping = await getMapping(headers);
+        const mapping = await getMapping(headers, useLLM);
         console.log(`Mapping:`, mapping);
         for (let i = 1; i < data.length; i++) { // Skip header
           const row = data[i];
@@ -96,20 +119,34 @@ async function aggregateBudgets() {
       }
     }
 
-    // Use LLM to normalize categories
-    const categoriesList = Array.from(allCategories);
-    const prompt = `Merge these budget categories into standardized, consolidated categories. Group similar ones (e.g., "Camera Gear" and "Photography Supplies" into "Photography"). Return ONLY a JSON object where keys are original categories and values are the standardized category names: ${JSON.stringify(categoriesList)}`;
-    const completion = await client.chat.completions.create({
-      model: "deepseek-ai/DeepSeek-V3.2:novita",
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-    });
-    const responseText = completion.choices[0].message.content;
-    const categoryMapping = JSON.parse(responseText.replace(/```json|```/g, ""));
+    // Normalize categories
+    let categoryMapping = {};
+    if (useLLM) {
+      const categoriesList = Array.from(allCategories);
+      const prompt = `Merge these budget categories into standardized, consolidated categories. Group similar ones (e.g., "Camera Gear" and "Photography Supplies" into "Photography"). Return ONLY a JSON object where keys are original categories and values are the standardized category names: ${JSON.stringify(categoriesList)}`;
+      const completion = await client.chat.completions.create({
+        model: "deepseek-ai/DeepSeek-V3.2:novita",
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+      });
+      const responseText = completion.choices[0].message.content;
+      categoryMapping = JSON.parse(responseText.replace(/```json|```/g, ""));
+    } else {
+      console.log("DeepSeek API key not working.");
+      const answer = await prompt("Do you want to proceed with unique categories without normalization? (y/n)");
+      if (answer.toLowerCase() !== 'y') {
+        console.log("Exiting.");
+        return;
+      }
+      // Use identity mapping
+      for (const cat of allCategories) {
+        categoryMapping[cat] = cat;
+      }
+    }
 
     // Apply mapping and sum amounts
     const categoryMap = new Map();
@@ -123,6 +160,24 @@ async function aggregateBudgets() {
     // Write to Master
     const masterId = extractId(master_url);
     const masterSheetName = await getSheetName(masterId);
+    const masterRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: masterId,
+      range: `${masterSheetName}!A1:Z100`
+    });
+    const masterData = masterRes.data.values || [];
+    if (masterData.length > 1) {
+      const answer = await prompt("Master sheet has existing data. Do you want to clear it and write new aggregated data? (y/n)");
+      if (answer.toLowerCase() !== 'y') {
+        console.log("Skipping write to master sheet.");
+        console.log(`Total spending across all clubs: ${total}`);
+        return;
+      }
+    }
+    // Clear the sheet
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: masterId,
+      range: `${masterSheetName}!A:Z`
+    });
     await sheets.spreadsheets.values.update({
       spreadsheetId: masterId,
       range: `${masterSheetName}!A1`,
